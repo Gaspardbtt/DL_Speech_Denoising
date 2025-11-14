@@ -25,3 +25,37 @@ import matplotlib.pyplot as plt
 
 #-------------------------------------------------
 
+# create /data repertory for all data files we will create
+if not os.path.exists("../"+"data") :
+    os.mkdir("../data")
+
+# Raw dataset Path
+source_audio_dir = "../LibriSpeech/dev-clean"
+
+# create clean dataset from raw LibriSpeech dataset
+
+if not os.path.exists("../data/clean_dataset") :
+    os.mkdir("../data/clean_dataset")
+
+clean_data_path = "../data/clean_dataset"
+
+
+if len(os.listdir(clean_data_path)) == 0:
+    
+    i = 0 
+    
+    for path, dirs, files in os.walk(source_audio_dir):
+        for filename in files:
+            if filename.endswith(".flac"): 
+                
+                i += 1
+                
+                source_path = os.path.join(path, filename)
+                new_filename = "file_" + f"{i}.wav"
+                dest_path = os.path.join(clean_data_path, new_filename)
+
+                # Copie + renomme en une fois
+                shutil.copy(source_path, dest_path)
+
+
+
