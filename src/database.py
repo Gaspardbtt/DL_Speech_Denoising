@@ -16,7 +16,7 @@ import shutil
 import re
 import pickle 
 from random import *
-
+from tqdm import tqdm 
 import matplotlib.pyplot as plt
 
 binary_method = 1   # 1 -> generate data to binary masks approch
@@ -45,23 +45,24 @@ if not os.path.exists("../data/clean_dataset") :
 
 clean_data_path = "../data/clean_dataset"
 
+# count the number of files for tqdm display 
+flac_files = []
+for path, dirs, files in os.walk(source_audio_dir):
+    for filename in files:
+        if filename.endswith(".flac"):
+            flac_files.append((path, filename))
+
+
 
 if len(os.listdir(clean_data_path)) == 0:
     
-    i = 0 
-    
-    for path, dirs, files in os.walk(source_audio_dir):
-        for filename in files:
-            if filename.endswith(".flac"): 
-                
-                i += 1
-                
-                source_path = os.path.join(path, filename)
-                new_filename = "file_" + f"{i}.wav"
-                dest_path = os.path.join(clean_data_path, new_filename)
+    for i, (path, filename) in tqdm(enumerate(flac_files, start=1), total=len(flac_files), desc="Creating clean dataset"):
+        
+        source_path = os.path.join(path, filename)
+        new_filename = f"file_{i}.wav"
+        dest_path = os.path.join(clean_data_path, new_filename)
 
-                # Copie + renomme en une fois
-                shutil.copy(source_path, dest_path)
+        shutil.copy(source_path, dest_path)
 
 
 #--------------------------------------------------------------------------
@@ -77,14 +78,16 @@ if not os.path.exists("../data/clean_dataset_norm") :
 
 norm_clean_data_path = "../data/clean_dataset_norm"
 
+clean_files = sorted(os.listdir(clean_data_path))
+
 if len(os.listdir(norm_clean_data_path)) == 0:
-    for path, dirs, files in os.walk(clean_data_path):
-        for filename in files:
-                y, sr = librosa.load(clean_data_path + "/" + filename, sr=sr)
-                duration = librosa.get_duration(y = y, sr = sr)
-                if duration > audio_duration :
-                    y = y[0:audio_duration * sr]
-                    sf.write(norm_clean_data_path + "/" + "norm_" + filename , y, sr)
+    for filename in tqdm(clean_files, total=len(clean_files), desc="Normalizing clean dataset"):
+
+            y, sr = librosa.load(clean_data_path + "/" + filename, sr=sr)
+            duration = librosa.get_duration(y = y, sr = sr)
+            if duration > audio_duration :
+                y = y[0:audio_duration * sr]
+                sf.write(norm_clean_data_path + "/" + "norm_" + filename , y, sr)
 
 
 # fonction that generate a random noise of 3 secs ( randomly choose that t_start of the noise in the file babble_16k.wav)
@@ -151,3 +154,41 @@ if binary_method:
                 spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
                 np.save(dest_path + '.npy', spectrogramme_mod_squarred)
 
+
+    if not os.path.exists("../data/preprocessed_mask_speech_plus_noise") :
+        os.mkdir("../data/preprocessed_mask_speech_plus_noise")
+
+    speech_plus_noise_dir = "../data/noisy_dataset"
+    preprocessed_mask_speech_plus_noise_dir = "../data/preprocessed_mask_speech_plus_noise"
+
+    if len(os.listdir(preprocessed_mask_speech_plus_noise_dir)) == 0:
+        for path, dirs, files in os.walk(speech_plus_noise_dir):
+            for filename in files:
+                source_path = os.path.join(path, filename)
+                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+                dest_path = os.path.join(preprocessed_mask_speech_plus_noise_dir, filename)
+                y, sr = librosa.load(source_path, sr = sr)
+                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+
+
+    if not os.path.exists("../data/preprocessed_mask_pure_noise") :
+        os.mkdir("../data/preprocessed_mask_pure_noise")
+
+    noise_dir = "../data/noise_only_dataset"
+    preprocessed_mask_pure_noise_dir = "../data/preprocessed_mask_pure_noise"
+
+    if len(os.listdir(preprocessed_mask_pure_noise_dir)) == 0:
+        for path, dirs, files in os.walk(noise_dir):
+            for filename in files:
+                source_path = os.path.join(path, filename)
+                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+                dest_path = os.path.join(preprocessed_mask_pure_noise_dir, filename)
+                y, sr = librosa.load(source_path, sr = sr)
+                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+                
+
+    
