@@ -19,6 +19,8 @@ from random import *
 
 import matplotlib.pyplot as plt
 
+binary_method = 1   # 1 -> generate data to binary masks approch
+
 
 #-------------------------------------------------
 
@@ -112,8 +114,8 @@ if len(os.listdir(noisy_data_path)) == 0:
     for path, dirs, files in os.walk(norm_clean_data_path):
         for filename in files:
             source_path = os.path.join(path, filename)    #os.path.join joint les deux parties du chemin path et filename pour avoir un chemin complet 
-            dest_path = os.path.join(noisy_data_path, "noised"+filename)   # idem pour la destination
-            dest_noise_path = os.path.join(noise_only_path, "noise"+ filename)
+            dest_path = os.path.join(noisy_data_path, "noised_"+filename)   # idem pour la destination
+            dest_noise_path = os.path.join(noise_only_path, "noise_"+ filename)
             y, sr = librosa.load(source_path, sr=sr)
             noise = rand_noise_generation(duree = audio_duration)
             y = y + alpha * noise
@@ -121,3 +123,31 @@ if len(os.listdir(noisy_data_path)) == 0:
             sf.write(dest_noise_path, noise, sr)
 
 #--------------------------------------------------------------------------
+
+# FIRST APPROCHE  : BINARY MASKS 
+
+win_length = 400 
+n_fft = 512
+hop_length = win_length//2 
+window = 'hann'
+
+
+
+if binary_method:
+
+    if not os.path.exists("../data/preprocessed_mask_pure_speech") :
+        os.mkdir("../data/preprocessed_mask_pure_speech")
+
+    preprocessed_mask_pure_speech_dir = "../data/preprocessed_mask_pure_speech"
+
+    if len(os.listdir(preprocessed_mask_pure_speech_dir)) == 0:
+        for path, dirs, files in os.walk(clean_data_path):
+            for filename in files:
+                source_path = os.path.join(path, filename)
+                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+                dest_path = os.path.join(preprocessed_mask_pure_speech_dir, filename)
+                y, sr = librosa.load(source_path, sr = sr)
+                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+
