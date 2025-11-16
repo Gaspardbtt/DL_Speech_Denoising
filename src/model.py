@@ -6,9 +6,9 @@ import torch.nn as nn
 
 # CNN arch for Mask approche
 
-class CNN(nn.Module):
+class CNN_MASK(nn.Module):
     def __init__(self):
-        super(CNN, self).__init__()
+        super(CNN_MASK, self).__init__()
         self.conv1 = nn.Conv2d(1, 8, kernel_size=3, padding=1)  
         self.conv2 = nn.Conv2d(8, 16, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(16, 8, kernel_size=3, padding=1)

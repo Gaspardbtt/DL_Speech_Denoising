@@ -2,5 +2,161 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.preprocessing import MinMaxScaler
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+from model import CNN_MASK
+
+#------------------------------------------------------------------------------------------------------------
+
+# train loop for Binary masks approche
+preprocessed_mask_speech_plus_noise_dir = "../data/preprocessed_mask_speech_plus_noise"
+preprocessed_mask_pure_speech_noise_dir = "../data/preprocessed_mask_pure_speech"
+mask_target_dir = "../data/mask_target"
+batch_size = 16
+device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+learning_rate = 0.001
+num_epochs = 30
 
 
+X_train = []
+X_test = []
+y_train = []
+y_test = []
+X, y = [], []
+
+name_files = sorted(os.listdir(preprocessed_mask_pure_speech_noise_dir))
+
+for filename in tqdm(name_files,total=len(name_files),desc="Loading datasets for training"): 
+    path_img_x = os.path.join(preprocessed_mask_speech_plus_noise_dir, "noised_" + filename)
+    path_img_y = os.path.join(mask_target_dir, "mask_" + filename)
+    scaler = MinMaxScaler()
+    imgx = np.load(path_img_x)
+    imgx = scaler.fit_transform(imgx)
+    imgx = torch.from_numpy(imgx).float()
+    imgy = np.load(path_img_y)
+    imgy = torch.from_numpy(imgy).float()
+    imgx = imgx.unsqueeze(1).permute(1, 0, 2) # pour avoir channels, height, width
+    imgy = imgy.unsqueeze(1).permute(1, 0, 2)
+    X.append(imgx)
+    y.append(imgy)
+
+
+X_train = X[:int(len(X)*0.8)]
+X_test = X[int(len(X)*0.8):]
+
+y_train = y[:int(len(y)*0.8)]
+y_test = y[int(len(y)*0.8):]
+
+X_train = torch.stack(X_train)
+y_train = torch.stack(y_train)
+X_test = torch.stack(X_test)
+y_test = torch.stack(y_test)
+
+
+train_dataset = TensorDataset(X_train, y_train)
+test_dataset = TensorDataset(X_test, y_test)
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    shuffle=True  
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    shuffle=False  
+)
+
+
+model = CNN_MASK().to(device)
+
+criterion = nn.BCELoss()  # loss binaire pcq mask binaire
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+# --- Counting params ---
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Total de parameters : {total_params:,}")
+print(f"Trainable parameters : {trainable_params:,}\n")
+print(f"device : {device}\n")
+# -------------------------------
+
+# training loop 
+
+print("--Neural Network training--")
+
+train_loss = []
+
+pbar = tqdm(total=num_epochs, desc="epochs")
+
+
+for epoch in range(num_epochs):
+    model.train()
+    training_loss = 0.0
+
+    for X_batch, y_batch in train_loader:
+        X_batch = X_batch.to(device)
+        y_batch = y_batch.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(X_batch)
+
+        loss = criterion(outputs, y_batch)
+        loss.backward()
+        optimizer.step()
+        
+        training_loss += loss.item() * X_batch.size(0)
+    epoch_loss = training_loss / len(train_loader.dataset)
+    train_loss.append(epoch_loss)
+
+
+
+    # eval loop 
+
+    model.eval()
+    with torch.no_grad():
+        test_loss = 0.0
+        val_loss = []
+        for X_batch, y_batch in test_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            outputs = model(X_batch)
+            outputs = (outputs >= 0.5).float()
+
+            loss = criterion(outputs, y_batch)
+            test_loss += loss.item() * X_batch.size(0)
+        test_loss = test_loss / len(test_loader.dataset)
+        pred_bin = (outputs >= 0.5).float()
+        accuracy = (pred_bin == y_batch).float().mean()
+        val_loss.append(test_loss)
+        print(f"Epoch {epoch+1}/{num_epochs} | Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Mean accuracy per pixels on last batch: {accuracy.item():.4f}")
+
+
+    pbar.update(1)
+
+
+pbar.close()
+
+# plot training loss curve
+M = np.max(train_loss)
+m = np.min(train_loss)
+plt.figure(figsize=(10, 5))
+plt.plot(train_loss, label='Train Loss', color='blue')
+
+plt.xlabel('Epochs')
+plt.xlim(0,num_epochs)
+plt.ylim(m,M)
+plt.ylabel('Loss')
+plt.title('Train Loss')
+plt.legend()
+plt.grid()
+plt.show()
+
+#------------------------------------------------------------------------------------------------------------
