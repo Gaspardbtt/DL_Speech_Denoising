@@ -113,17 +113,18 @@ if not os.path.exists("../data/noise_only_dataset") :
 noisy_data_path = "../data/noisy_dataset"
 noise_only_path = "../data/noise_only_dataset"
 
+norm_clean_files = sorted(os.listdir(norm_clean_data_path)) 
+
 if len(os.listdir(noisy_data_path)) == 0:
-    for path, dirs, files in os.walk(norm_clean_data_path):
-        for filename in files:
-            source_path = os.path.join(path, filename)    #os.path.join joint les deux parties du chemin path et filename pour avoir un chemin complet 
-            dest_path = os.path.join(noisy_data_path, "noised_"+filename)   # idem pour la destination
-            dest_noise_path = os.path.join(noise_only_path, "noise_"+ filename)
-            y, sr = librosa.load(source_path, sr=sr)
-            noise = rand_noise_generation(duree = audio_duration)
-            y = y + alpha * noise
-            sf.write(dest_path, y, sr)
-            sf.write(dest_noise_path, noise, sr)
+    for filename in tqdm(norm_clean_files, total=len(norm_clean_files), desc="Creating noisy datasets"):
+        source_path = norm_clean_data_path + "/" +  filename
+        dest_path = noisy_data_path + "/"+ "noised_" + filename
+        dest_noise_path = noise_only_path + "/" + "noise_" + filename
+        y, sr = librosa.load(source_path, sr=sr)
+        noise = rand_noise_generation(duree = audio_duration)
+        y = y + alpha * noise
+        sf.write(dest_path, y, sr)
+        sf.write(dest_noise_path, noise, sr)
 
 #--------------------------------------------------------------------------
 
@@ -143,16 +144,16 @@ if binary_method:
 
     preprocessed_mask_pure_speech_dir = "../data/preprocessed_mask_pure_speech"
 
+
     if len(os.listdir(preprocessed_mask_pure_speech_dir)) == 0:
-        for path, dirs, files in os.walk(clean_data_path):
-            for filename in files:
-                source_path = os.path.join(path, filename)
-                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
-                dest_path = os.path.join(preprocessed_mask_pure_speech_dir, filename)
-                y, sr = librosa.load(source_path, sr = sr)
-                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
-                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
-                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+        for filename in tqdm(norm_clean_files, total=len(norm_clean_files), desc="Creating speech pure spectrogams"):
+            source_path = os.path.join(norm_clean_data_path, filename)
+            filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+            dest_path = os.path.join(preprocessed_mask_pure_speech_dir, filename)
+            y, sr = librosa.load(source_path, sr = sr)
+            spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+            spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+            np.save(dest_path + '.npy', spectrogramme_mod_squarred)
 
 
     if not os.path.exists("../data/preprocessed_mask_speech_plus_noise") :
@@ -161,16 +162,17 @@ if binary_method:
     speech_plus_noise_dir = "../data/noisy_dataset"
     preprocessed_mask_speech_plus_noise_dir = "../data/preprocessed_mask_speech_plus_noise"
 
+    speech_plus_noise_files = sorted(os.listdir(speech_plus_noise_dir))
+
     if len(os.listdir(preprocessed_mask_speech_plus_noise_dir)) == 0:
-        for path, dirs, files in os.walk(speech_plus_noise_dir):
-            for filename in files:
-                source_path = os.path.join(path, filename)
-                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
-                dest_path = os.path.join(preprocessed_mask_speech_plus_noise_dir, filename)
-                y, sr = librosa.load(source_path, sr = sr)
-                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
-                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
-                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+        for filename in tqdm(speech_plus_noise_files, total=len(speech_plus_noise_files), desc="Creating noise+speech spectrogams"):
+            source_path = os.path.join(speech_plus_noise_dir, filename)
+            filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+            dest_path = os.path.join(preprocessed_mask_speech_plus_noise_dir, filename)
+            y, sr = librosa.load(source_path, sr = sr)
+            spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+            spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+            np.save(dest_path + '.npy', spectrogramme_mod_squarred)
 
 
     if not os.path.exists("../data/preprocessed_mask_pure_noise") :
@@ -179,16 +181,17 @@ if binary_method:
     noise_dir = "../data/noise_only_dataset"
     preprocessed_mask_pure_noise_dir = "../data/preprocessed_mask_pure_noise"
 
+    noise_files = sorted(os.listdir(noise_dir))
+
     if len(os.listdir(preprocessed_mask_pure_noise_dir)) == 0:
-        for path, dirs, files in os.walk(noise_dir):
-            for filename in files:
-                source_path = os.path.join(path, filename)
-                filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
-                dest_path = os.path.join(preprocessed_mask_pure_noise_dir, filename)
-                y, sr = librosa.load(source_path, sr = sr)
-                spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
-                spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
-                np.save(dest_path + '.npy', spectrogramme_mod_squarred)
+        for filename in tqdm(noise_files, total=len(noise_files), desc="Creating noise pure spectrogams"):
+            source_path = os.path.join(noise_dir, filename)
+            filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
+            dest_path = os.path.join(preprocessed_mask_pure_noise_dir, filename)
+            y, sr = librosa.load(source_path, sr = sr)
+            spectrogramme = librosa.stft(y, n_fft=n_fft, win_length=win_length, hop_length=hop_length, window=window)
+            spectrogramme_mod_squarred = librosa.util.abs2(spectrogramme)
+            np.save(dest_path + '.npy', spectrogramme_mod_squarred)
                 
 
     
