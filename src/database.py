@@ -136,7 +136,6 @@ hop_length = win_length//2
 window = 'hann'
 
 
-
 if binary_method:
 
     if not os.path.exists("../data/preprocessed_mask_pure_speech") :
@@ -146,7 +145,7 @@ if binary_method:
 
 
     if len(os.listdir(preprocessed_mask_pure_speech_dir)) == 0:
-        for filename in tqdm(norm_clean_files, total=len(norm_clean_files), desc="Creating speech pure spectrogams"):
+        for filename in tqdm(norm_clean_files, total=len(norm_clean_files), desc="Creating speech pure spectrograms"):
             source_path = os.path.join(norm_clean_data_path, filename)
             filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
             dest_path = os.path.join(preprocessed_mask_pure_speech_dir, filename)
@@ -165,7 +164,7 @@ if binary_method:
     speech_plus_noise_files = sorted(os.listdir(speech_plus_noise_dir))
 
     if len(os.listdir(preprocessed_mask_speech_plus_noise_dir)) == 0:
-        for filename in tqdm(speech_plus_noise_files, total=len(speech_plus_noise_files), desc="Creating noise+speech spectrogams"):
+        for filename in tqdm(speech_plus_noise_files, total=len(speech_plus_noise_files), desc="Creating noise+speech spectrograms"):
             source_path = os.path.join(speech_plus_noise_dir, filename)
             filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
             dest_path = os.path.join(preprocessed_mask_speech_plus_noise_dir, filename)
@@ -184,7 +183,7 @@ if binary_method:
     noise_files = sorted(os.listdir(noise_dir))
 
     if len(os.listdir(preprocessed_mask_pure_noise_dir)) == 0:
-        for filename in tqdm(noise_files, total=len(noise_files), desc="Creating noise pure spectrogams"):
+        for filename in tqdm(noise_files, total=len(noise_files), desc="Creating noise pure spectrograms"):
             source_path = os.path.join(noise_dir, filename)
             filename = filename.replace('.wav', '') # pour enlever le .flac à la fin du nom du fichier
             dest_path = os.path.join(preprocessed_mask_pure_noise_dir, filename)
@@ -194,4 +193,25 @@ if binary_method:
             np.save(dest_path + '.npy', spectrogramme_mod_squarred)
                 
 
+    # creating target masks for further DL-model training 
+
+    if not os.path.exists("../data/mask_target") :
+        os.mkdir("../data/mask_target")
+
+    mask_target = "../data/mask_target"
+    preprocessed_mask_pure_speech_files = sorted(os.listdir(preprocessed_mask_pure_speech_dir))
+    
+    if len(os.listdir(mask_target)) == 0:
+            for filename in tqdm(preprocessed_mask_pure_speech_files, total=len(preprocessed_mask_pure_speech_files), desc="Creating masks"):
+                
+                path_noise = os.path.join(preprocessed_mask_pure_noise_dir, "noise_"+filename)
+                path_speech = os.path.join(preprocessed_mask_pure_speech_dir, filename)
+                dest_path = os.path.join(mask_target, "mask_"+filename)
+                noise = np.load(path_noise)
+                speech = np.load(path_speech)
+                diff = np.subtract(speech, noise)
+
+                mask = np.zeros([diff.shape[0], diff.shape[1]])
+                mask = (diff > 0).astype(int)
+                np.save(dest_path, mask)
     
