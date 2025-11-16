@@ -9,7 +9,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from model import CNN_MASK
+from model import *
 
 #------------------------------------------------------------------------------------------------------------
 
@@ -74,7 +74,7 @@ test_loader = DataLoader(
 )
 
 
-model = CNN_MASK().to(device)
+model = UNet().to(device)
 
 criterion = nn.BCELoss()  # loss binaire pcq mask binaire
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)

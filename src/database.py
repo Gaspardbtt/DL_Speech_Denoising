@@ -130,9 +130,9 @@ if len(os.listdir(noisy_data_path)) == 0:
 
 # FIRST APPROCHE  : BINARY MASKS 
 
-win_length = 400 
-n_fft = 512
-hop_length = win_length//2 
+win_length = 400
+n_fft = 510
+hop_length = 188
 window = 'hann'
 
 
