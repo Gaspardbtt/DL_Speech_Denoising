@@ -8,6 +8,9 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from os import listdir, mkdir, system
+import os.path
+
 
 from model import *
 
@@ -20,7 +23,7 @@ mask_target_dir = "../data/mask_target"
 batch_size = 16
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 learning_rate = 0.001
-num_epochs = 30
+num_epochs = 10
 
 
 X_train = []
@@ -42,21 +45,26 @@ for filename in tqdm(name_files,total=len(name_files),desc="Loading datasets for
     imgy = torch.from_numpy(imgy).float()
     imgx = imgx.unsqueeze(1).permute(1, 0, 2) # pour avoir channels, height, width
     imgy = imgy.unsqueeze(1).permute(1, 0, 2)
-    X.append(imgx)
-    y.append(imgy)
+    X.append([imgx, filename])
+    y.append([imgy, filename])
 
 
-X_train = X[:int(len(X)*0.8)]
-X_test = X[int(len(X)*0.8):]
+X_train_named = X[:int(len(X)*0.8)]
+X_test_named = X[int(len(X)*0.8):]
 
-y_train = y[:int(len(y)*0.8)]
-y_test = y[int(len(y)*0.8):]
+y_train_named = y[:int(len(y)*0.8)]
+y_test_named = y[int(len(y)*0.8):]
 
-X_train = torch.stack(X_train)
-y_train = torch.stack(y_train)
-X_test = torch.stack(X_test)
-y_test = torch.stack(y_test)
+X_train = torch.stack([x[0] for x in X_train_named])
+y_train = torch.stack([x[0] for x in y_train_named])
+X_test = torch.stack([x[0] for x in X_test_named])
+y_test = torch.stack([x[0] for x in y_test_named])
 
+X_test_names = [x[1] for x in X_test_named]
+
+os.makedirs("../data/named", exist_ok=True)
+
+np.save("../data/named/names" + '.npy', X_test_names)
 
 train_dataset = TensorDataset(X_train, y_train)
 test_dataset = TensorDataset(X_test, y_test)
@@ -74,7 +82,7 @@ test_loader = DataLoader(
 )
 
 
-model = UNet().to(device)
+model = CNN_MASK().to(device)
 
 criterion = nn.BCELoss()  # loss binaire pcq mask binaire
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -160,3 +168,4 @@ plt.grid()
 plt.show()
 
 #------------------------------------------------------------------------------------------------------------
+
