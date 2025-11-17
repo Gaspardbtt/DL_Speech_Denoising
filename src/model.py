@@ -32,6 +32,33 @@ class CNN_MASK(nn.Module):
         return x
     
 
+class DEEP_CNN(nn.Module):
+    def __init__(self):
+        super(DEEP_CNN, self).__init__()
+
+
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=3, padding=1)  
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv5 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.conv6 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.conv7 = nn.Conv2d(16, 8, kernel_size=3, padding=1)
+        self.conv8 = nn.Conv2d(8, 1, kernel_size=3, padding=1)  
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.relu(self.conv3(x))
+        x = self.relu(self.conv4(x))
+        x = self.relu(self.conv5(x))
+        x = self.relu(self.conv6(x))
+        x = self.relu(self.conv7(x))
+        x = self.sigmoid(self.conv8(x))
+        return x
+
 #https://github.com/milesial/Pytorch-UNet/blob/master/unet/unet_model.py
 
 class UNet(nn.Module):
@@ -43,16 +70,25 @@ class UNet(nn.Module):
 
         self.inc = (DoubleConv(n_channels, 8))
         self.down1 = (Down(8, 16))
+        self.down2 = (Down(16, 32))
+        self.down3 = (Down(32, 64))
         factor = 2 if bilinear else 1
-        self.up1 = (Up(16, 8 // factor, bilinear))
+        self.up1 = (Up(64, 32 // factor, bilinear))
+        self.up2 = (Up(32, 16 // factor, bilinear))
+        self.up3 = (Up(16, 8 // factor, bilinear))
         self.outc = (OutConv(8, n_classes))
+        self.sigmoid = nn.Sigmoid()
 
 
     def forward(self, x):
         x1 = self.inc(x)
         x2 = self.down1(x1)
-        x = self.up1(x2, x1)
-        logits = self.outc(x)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x = self.up1(x4, x3)
+        x = self.up2(x, x2)
+        x = self.up3(x, x1)
+        logits = self.sigmoid(self.outc(x))
         return logits
 
 #-------------------------------------------------------------------------------------
