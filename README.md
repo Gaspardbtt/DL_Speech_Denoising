@@ -1,4 +1,4 @@
-Super cool project without a single use of chatGPT because we are Chads :) 
+Super cool project without a single use of chatGPT because we are Chads like officer Thundercock :) 
 
 arch of the project :
 
