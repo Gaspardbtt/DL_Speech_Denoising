@@ -12,9 +12,11 @@ class CNN_MASK(nn.Module):
         self.conv1 = nn.Conv2d(1, 8, kernel_size=3, padding=1)  
         self.conv2 = nn.Conv2d(8, 16, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
-        self.conv5 = nn.Conv2d(16, 8, kernel_size=3, padding=1)
-        self.conv6 = nn.Conv2d(8, 1, kernel_size=3, padding=1)  
+        self.conv4 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv5 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.conv6 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.conv7 = nn.Conv2d(16, 8, kernel_size=3, padding=1)
+        self.conv8 = nn.Conv2d(8, 1, kernel_size=3, padding=1)  
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
@@ -24,7 +26,9 @@ class CNN_MASK(nn.Module):
         x = self.relu(self.conv3(x))
         x = self.relu(self.conv4(x))
         x = self.relu(self.conv5(x))
-        x = self.sigmoid(self.conv6(x))
+        x = self.relu(self.conv6(x))
+        x = self.relu(self.conv7(x))
+        x = self.sigmoid(self.conv8(x))
         return x
     
 
