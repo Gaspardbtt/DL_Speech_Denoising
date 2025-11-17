@@ -23,7 +23,7 @@ mask_target_dir = "../data/mask_target"
 batch_size = 16
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 learning_rate = 0.001
-num_epochs = 10
+num_epochs = 20
 
 
 X_train = []
@@ -80,6 +80,10 @@ test_loader = DataLoader(
     batch_size=batch_size,
     shuffle=False  
 )
+
+os.makedirs("../data/test_loader", exist_ok=True)
+torch.save(test_loader, "../data/test_loader/test_loader.pt")
+
 
 
 model = CNN_MASK().to(device)
@@ -151,6 +155,10 @@ for epoch in range(num_epochs):
 
 
 pbar.close()
+
+# loading model
+
+torch.save(model.state_dict(), "../models/model.pt")
 
 # plot training loss curve
 M = np.max(train_loss)
