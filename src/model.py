@@ -72,22 +72,45 @@ class UNet(nn.Module):
         self.down1 = (Down(8, 16))
         self.down2 = (Down(16, 32))
         self.down3 = (Down(32, 64))
+        self.down4 = (Down(64, 128))
+
         factor = 2 if bilinear else 1
-        self.up1 = (Up(64, 32 // factor, bilinear))
-        self.up2 = (Up(32, 16 // factor, bilinear))
-        self.up3 = (Up(16, 8 // factor, bilinear))
+        self.up1 = (Up(128, 64 // factor, bilinear))
+        self.up2 = (Up(64, 32 // factor, bilinear))
+        self.up3 = (Up(32, 16 // factor, bilinear))
+        self.up4 = (Up(16, 8 // factor, bilinear))
+
         self.outc = (OutConv(8, n_classes))
         self.sigmoid = nn.Sigmoid()
+        self.dropout = nn.Dropout(0.2)
 
 
     def forward(self, x):
         x1 = self.inc(x)
         x2 = self.down1(x1)
+        x2 = self.dropout(x2)
+
         x3 = self.down2(x2)
+        x3 = self.dropout(x3)
+
         x4 = self.down3(x3)
-        x = self.up1(x4, x3)
-        x = self.up2(x, x2)
-        x = self.up3(x, x1)
+        x4 = self.dropout(x4)
+
+        x5 = self.down4(x4)
+        x5 = self.dropout(x5)
+
+        x = self.up1(x5, x4)
+        x = self.dropout(x)
+
+        x = self.up2(x, x3)
+        x = self.dropout(x)
+
+        x = self.up3(x, x2)
+        x = self.dropout(x)
+
+        x = self.up4(x, x1)
+        x = self.dropout(x)
+
         logits = self.sigmoid(self.outc(x))
         return logits
 

@@ -10,7 +10,7 @@ import soundfile as sf
 
 
 # test files source 
-test_loader = torch.load("../data/test_loader/test_loader.pt")
+test_loader = torch.load("../data/test_loader/test_loader.pt", weights_only=False)
 X_test_names = np.load("../data/named/names.npy")
 
 # STFT params 
@@ -23,9 +23,9 @@ sr = 16000
 #Device
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
-model = CNN_MASK()
+model = UNet()
 model.to(device) 
-model.load_state_dict(torch.load("../models/model.pt"))
+model.load_state_dict(torch.load("../models/Unet.pt"))
 model.eval()
 
 

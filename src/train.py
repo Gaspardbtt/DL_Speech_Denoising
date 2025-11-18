@@ -20,10 +20,10 @@ from model import *
 preprocessed_mask_speech_plus_noise_dir = "../data/preprocessed_mask_speech_plus_noise"
 preprocessed_mask_pure_speech_noise_dir = "../data/preprocessed_mask_pure_speech"
 mask_target_dir = "../data/mask_target"
-batch_size = 16
+batch_size = 32
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-learning_rate = 0.001
-num_epochs = 20
+learning_rate = 0.0005
+num_epochs = 15
 
 
 X_train = []
@@ -86,7 +86,7 @@ torch.save(test_loader, "../data/test_loader/test_loader.pt")
 
 
 
-model = CNN_MASK().to(device)
+model = UNet().to(device)
 
 criterion = nn.BCELoss()  # loss binaire pcq mask binaire
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -94,7 +94,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 # --- Counting params ---
 total_params = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"Total de parameters : {total_params:,}")
+print(f"Total parameters : {total_params:,}")
 print(f"Trainable parameters : {trainable_params:,}\n")
 print(f"device : {device}\n")
 # -------------------------------
@@ -104,6 +104,10 @@ print(f"device : {device}\n")
 print("--Neural Network training--")
 
 train_loss = []
+val_loss = []
+# model rep 
+os.makedirs("../models", exist_ok=True)
+
 
 pbar = tqdm(total=num_epochs, desc="epochs")
 
@@ -134,13 +138,12 @@ for epoch in range(num_epochs):
     model.eval()
     with torch.no_grad():
         test_loss = 0.0
-        val_loss = []
         for X_batch, y_batch in test_loader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
 
             outputs = model(X_batch)
-            outputs = (outputs >= 0.5).float()
+            #outputs = (outputs >= 0.5).float()
 
             loss = criterion(outputs, y_batch)
             test_loss += loss.item() * X_batch.size(0)
@@ -148,6 +151,12 @@ for epoch in range(num_epochs):
         pred_bin = (outputs >= 0.5).float()
         accuracy = (pred_bin == y_batch).float().mean()
         val_loss.append(test_loss)
+        m = np.min(val_loss)
+
+        if test_loss <= m:
+            # loading model
+            torch.save(model.state_dict(), "../models/Unet.pt")
+            opt_epoch = epoch
         print(f"Epoch {epoch+1}/{num_epochs} | Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f} | Mean accuracy per pixels on last batch: {accuracy.item():.4f}")
 
 
@@ -156,21 +165,24 @@ for epoch in range(num_epochs):
 
 pbar.close()
 
-# loading model
-
-torch.save(model.state_dict(), "../models/model.pt")
+print(f"best model saved at epoch : {opt_epoch}/{num_epochs}")
 
 # plot training loss curve
-M = np.max(train_loss)
-m = np.min(train_loss)
+M1 = np.max(train_loss)
+M2 = np.max(val_loss)
+M = max(M1, M2)
+
+m1 = np.min(train_loss)
+m2 = np.min(val_loss)
+m = min(m1, m2)
 plt.figure(figsize=(10, 5))
 plt.plot(train_loss, label='Train Loss', color='blue')
-
+plt.plot(val_loss, label='Validation loss', color='orange')
 plt.xlabel('Epochs')
 plt.xlim(0,num_epochs)
 plt.ylim(m,M)
 plt.ylabel('Loss')
-plt.title('Train Loss')
+plt.title('Train Loss / Validation Loss')
 plt.legend()
 plt.grid()
 plt.show()
