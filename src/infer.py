@@ -9,8 +9,9 @@ import numpy as np
 import soundfile as sf
 from sklearn.preprocessing import MinMaxScaler
 
-binary_method = 1
+binary_method = 0
 complex_masks_method = 0
+temporal_method = 1
 
 if binary_method :
 
@@ -217,3 +218,46 @@ if complex_masks_method :
             sf.write(f"{output_dir}/{clean_name}.wav", y_synth, sr)
 
             index += 1
+
+
+if temporal_method:
+
+    sr = 16000
+
+    test_loader = torch.load("../data/test_loader/test_loader_temp.pt", weights_only=False)
+    X_test_names = np.load("../data/named/names.npy")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+
+    model = DemucsLike()
+    model.to(device)
+    model.load_state_dict(torch.load("../models/DemucsLike.pt", map_location=device))
+    model.eval()
+
+    if not os.path.isdir("../data/synth_data_temp"):
+        os.mkdir("../data/synth_data_temp")
+
+    output_dir = "../data/synth_data_temp"
+    clean_dataset_dir = "../data/clean_dataset_norm"
+
+    X_test_names = [f.replace(".npy", "") for f in X_test_names]
+
+    outputs_idx = 0
+
+    with torch.no_grad():
+        for X_batch, _ in test_loader:
+            X_batch = X_batch.to(device)
+
+            outputs = model(X_batch) 
+            outputs = outputs.cpu().numpy()
+
+            batch_size = outputs.shape[0]
+
+            for j in range(batch_size):
+
+                clean_name = X_test_names[outputs_idx]
+                y_pred = outputs[j][0] 
+
+                sf.write(f"{output_dir}/{clean_name}", y_pred, samplerate = sr)
+
+                outputs_idx += 1

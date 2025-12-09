@@ -34,8 +34,8 @@ if not os.path.exists("../"+"data") :
     os.mkdir("../data")
 
 # Raw dataset Path
-# source_audio_dir = "../LibriSpeech/dev-clean"
-source_audio_dir = "../LibriSpeech_7G/train-clean-100"
+source_audio_dir = "../LibriSpeech/dev-clean"
+#source_audio_dir = "../LibriSpeech_7G/train-clean-100"
 
 
 #--------------------------------------------------------------------------
