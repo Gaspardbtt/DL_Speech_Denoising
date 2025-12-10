@@ -195,27 +195,39 @@ class OutConv(nn.Module):
 
 # ----------------Temporal approach-------------------
 
-
 class DemucsLike(nn.Module):
-    def __init__(self, input_channels=1, hidden=64, lstm_hidden=128):
+    def __init__(self, input_channels=1, hidden=64, lstm_hidden=128, dropout_rate=0.2):
         super().__init__()
+        
+        # Dropout
+        self.dropout = nn.Dropout(dropout_rate)
 
-        # Encoder (32 → 64 → 128)
+        # Encoder
         self.encoder = nn.Sequential(
             nn.Conv1d(input_channels, hidden, kernel_size=8, stride=2, padding=3),  
             nn.ReLU(),
+            self.dropout, 
+            
             nn.Conv1d(hidden, hidden*2, kernel_size=8, stride=2, padding=3),        
             nn.ReLU(),
+            self.dropout,
+            
             nn.Conv1d(hidden*2, hidden*4, kernel_size=8, stride=2, padding=3),   
-            nn.ReLU()
+            nn.ReLU(),
+            self.dropout,
+            
+            nn.Conv1d(hidden*4, hidden*8, kernel_size=8, stride=2, padding=3),   
+            nn.ReLU(),
         )
 
-        # LSTM
-        self.lstm = nn.LSTM(hidden*4, lstm_hidden, num_layers=1, batch_first=True, bidirectional=False)
-        self.linear_after_lstm = nn.Linear(lstm_hidden, hidden*4)
+        # LSTM 
+        self.lstm = nn.LSTM(hidden*8, lstm_hidden, num_layers=1, batch_first=True, bidirectional=False)
+        self.linear_after_lstm = nn.Linear(lstm_hidden, hidden*8)
 
-        # Decoder (128 → 64 → 32 → 1)
+        # Decoder 
         self.decoder = nn.Sequential(
+            nn.ConvTranspose1d(hidden*8, hidden*4, kernel_size=8, stride=2, padding=3),
+            nn.ReLU(),
             nn.ConvTranspose1d(hidden*4, hidden*2, kernel_size=8, stride=2, padding=3),
             nn.ReLU(),
             nn.ConvTranspose1d(hidden*2, hidden, kernel_size=8, stride=2, padding=3),
@@ -230,6 +242,10 @@ class DemucsLike(nn.Module):
         # LSTM
         z_lstm = z.permute(0, 2, 1)
         z_lstm, _ = self.lstm(z_lstm)
+        
+        # Dropout 
+        z_lstm = self.dropout(z_lstm) 
+        
         z_lstm = self.linear_after_lstm(z_lstm)
         z_lstm = z_lstm.permute(0, 2, 1)
 
