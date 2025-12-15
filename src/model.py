@@ -251,3 +251,214 @@ class DemucsLike(nn.Module):
 
         # Decode
         return self.decoder(z_lstm)
+    
+
+#---------------------Demucs simple-----------------------
+
+class VerySimpleDemucs(nn.Module):
+    def __init__(self, input_channels=1, hidden=64, lstm_hidden=128, dropout_rate=0.1):
+        super().__init__()
+
+        self.dropout = nn.Dropout(dropout_rate)
+
+        # -------- Encoder (sans dropout = plus rapide)
+        self.enc1 = nn.Sequential(
+            nn.Conv1d(input_channels, hidden, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.enc2 = nn.Sequential(
+            nn.Conv1d(hidden, hidden*2, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.enc3 = nn.Sequential(
+            nn.Conv1d(hidden*2, hidden*4, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.enc4 = nn.Sequential(
+            nn.Conv1d(hidden*4, hidden*8, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+
+        # -------- LSTM (gros gain ici)
+        self.lstm = nn.LSTM(hidden*8, lstm_hidden, num_layers=2, batch_first=True)
+        self.linear_after_lstm = nn.Linear(lstm_hidden, hidden*8)
+
+        # -------- Decoder
+        self.dec4 = nn.Sequential(
+            nn.ConvTranspose1d(hidden*8, hidden*4, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.dec3 = nn.Sequential(
+            nn.ConvTranspose1d(hidden*4, hidden*2, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.dec2 = nn.Sequential(
+            nn.ConvTranspose1d(hidden*2, hidden, kernel_size=8, stride=2, padding=3),
+            nn.ReLU()
+        )
+        self.dec1 = nn.ConvTranspose1d(hidden, input_channels, kernel_size=8, stride=2, padding=3)
+
+    def forward(self, x):
+        # Encode
+        e1 = self.enc1(x)
+        e2 = self.enc2(e1)
+        e3 = self.enc3(e2)
+        e4 = self.enc4(e3)
+
+        # LSTM
+        z = e4.permute(0, 2, 1)
+        z, _ = self.lstm(z)
+        z = self.dropout(z)
+        z = self.linear_after_lstm(z)
+        z = z.permute(0, 2, 1)
+
+        # Decode
+        d4 = self.dec4(z) + e3
+        d3 = self.dec3(d4) + e2
+        d2 = self.dec2(d3) + e1
+        out = self.dec1(d2)
+        return out
+
+
+#######More complex demucs architecture########
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# --------------------------------------------------
+# Gated Convolution (GLU)
+# --------------------------------------------------
+class ConvGLU(nn.Module):
+    def __init__(self, in_ch, out_ch, kernel_size=8, stride=2, padding=3):
+        super().__init__()
+        self.conv = nn.Conv1d(
+            in_ch, out_ch * 2,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding
+        )
+
+    def forward(self, x):
+        a, b = self.conv(x).chunk(2, dim=1)
+        return a * torch.sigmoid(b)
+
+
+# --------------------------------------------------
+# Encoder
+# --------------------------------------------------
+class EncoderBlock(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.net = nn.Sequential(
+            ConvGLU(in_ch, out_ch),
+            nn.GroupNorm(1, out_ch)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+# --------------------------------------------------
+# Decoder
+# --------------------------------------------------
+class DecoderBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, skip_ch):
+        super().__init__()
+
+        self.deconv = nn.ConvTranspose1d(
+            in_ch, out_ch * 2,
+            kernel_size=8,
+            stride=2,
+            padding=3
+        )
+
+        self.norm = nn.GroupNorm(1, out_ch)
+        self.skip_proj = nn.Conv1d(skip_ch, out_ch, kernel_size=1)
+
+    def forward(self, x, skip):
+        a, b = self.deconv(x).chunk(2, dim=1)
+        x = a * torch.sigmoid(b)
+        x = self.norm(x)
+
+        skip = self.skip_proj(skip)
+        x = x[..., :skip.size(-1)]
+
+        return x + skip
+
+
+# --------------------------------------------------
+# LIGHT DEMUCS
+# --------------------------------------------------
+class SimpleDemucs(nn.Module):
+    def __init__(
+        self,
+        input_channels=1,
+        base_channels=32,
+        depth=5,
+        max_channels=256,
+        lstm_hidden=256,
+        dropout=0.1
+    ):
+        super().__init__()
+
+        self.encoders = nn.ModuleList()
+        self.decoders = nn.ModuleList()
+
+        ch = input_channels
+        encoder_channels = []
+
+        # -------- Encoder
+        for _ in range(depth):
+            out_ch = min(base_channels, max_channels)
+            self.encoders.append(EncoderBlock(ch, out_ch))
+            encoder_channels.append(out_ch)
+            ch = out_ch
+            base_channels *= 2
+
+        # -------- Bottleneck LSTM (raisonnable)
+        self.lstm = nn.LSTM(
+            input_size=ch,
+            hidden_size=lstm_hidden,
+            num_layers=1,
+            bidirectional=True,
+            batch_first=True
+        )
+
+        self.linear = nn.Linear(lstm_hidden * 2, ch)
+        self.dropout = nn.Dropout(dropout)
+
+        # -------- Decoder
+        for skip_ch in reversed(encoder_channels):
+            self.decoders.append(
+                DecoderBlock(ch, skip_ch, skip_ch)
+            )
+            ch = skip_ch
+
+        self.final = nn.Conv1d(ch, input_channels, kernel_size=1)
+
+    def forward(self, x):
+        orig_len = x.size(-1)
+
+        skips = []
+        for enc in self.encoders:
+            x = enc(x)
+            skips.append(x)
+
+        z = x.permute(0, 2, 1)
+        z, _ = self.lstm(z)
+        z = self.dropout(z)
+        z = self.linear(z)
+        x = z.permute(0, 2, 1)
+
+        for dec in self.decoders:
+            x = dec(x, skips.pop())
+
+        x = self.final(x)
+
+        if x.size(-1) != orig_len:
+            x = F.pad(x, (0, orig_len - x.size(-1)))
+
+        return x
+
+

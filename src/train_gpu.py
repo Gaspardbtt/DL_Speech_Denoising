@@ -11,6 +11,7 @@ from tqdm import tqdm
 from os import listdir, mkdir, system
 import os.path
 import librosa
+import argparse
 from numpy import linalg
 
 
@@ -555,190 +556,262 @@ if binary_method :
 
     #------------------------------------------------------------------------------------------------------------
 
-
 if temporal_method :
 
-    clean_dir = "../data/clean_dataset_norm"
-    noisy_dir = "../data/noisy_dataset"
-    batch_size = 8
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-    learning_rate = 0.0005
-    num_epochs = 15
+    # ======================================================
+    # CUDA / A100 OPTIM
+    # ======================================================
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")
 
-    X, y = [], []
+    # ======================================================
+    # ARGUMENTS TERMINAL
+    # ======================================================
+    def get_args():
+        parser = argparse.ArgumentParser()
 
-    name_files = sorted(os.listdir(clean_dir))
+        parser.add_argument("--clean_dir", type=str, default="../data/clean_dataset_norm")
+        parser.add_argument("--noisy_dir", type=str, default="../data/noisy_dataset")
+        parser.add_argument("--cache_path", type=str, default="../data/cache/dataset_temporal.pt")
 
-    for filename in tqdm(name_files, total=len(name_files), desc="Loading datasets for training"):
+        parser.add_argument("--batch_size", type=int, default=8)
+        parser.add_argument("--lr", type=float, default=5e-4)
+        parser.add_argument("--epochs", type=int, default=15)
+        parser.add_argument("--use_cache", action="store_true")
 
-        path_noisy = os.path.join(noisy_dir, "noised_" + filename)
-        path_clean = os.path.join(clean_dir, filename)
+        parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"])
 
-        noisy_audio, sr = librosa.load(path_noisy, sr=None)  
-        clean_audio, sr = librosa.load(path_clean, sr=None)
-
-        # Normalisation MinMax entre -1 et 1
-        noisy_scaled = noisy_audio / (np.max(np.abs(noisy_audio)) + 1e-8)
-        clean_scaled = clean_audio / (np.max(np.abs(clean_audio)) + 1e-8)
+        return parser.parse_args()
 
 
-        noisy = torch.from_numpy(noisy_scaled).float().unsqueeze(0).unsqueeze(0)
-        clean = torch.from_numpy(clean_scaled).float().unsqueeze(0).unsqueeze(0)
+    # ======================================================
+    # DEVICE
+    # ======================================================
+    def get_device(device_arg):
+        if device_arg == "auto":
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                return torch.device("mps")
+            else:
+                return torch.device("cpu")
+        return torch.device(device_arg)
 
-        X.append([noisy, filename])
-        y.append([clean, filename])
 
-    # Split train/test
-    split = int(len(X) * 0.8)
-    X_train_named = X[:split]
-    X_test_named = X[split:]
-    y_train_named = y[:split]
-    y_test_named = y[split:]
+    # ======================================================
+    # DATASET CREATION + CACHE
+    # ======================================================
+    def build_and_cache_dataset(clean_dir, noisy_dir, cache_path):
+        X, y = [], []
 
-    X_train = torch.cat([x[0] for x in X_train_named], dim=0)
-    y_train = torch.cat([x[0] for x in y_train_named], dim=0)
-    X_test = torch.cat([x[0] for x in X_test_named], dim=0)
-    y_test = torch.cat([x[0] for x in y_test_named], dim=0)
+        filenames = sorted(os.listdir(clean_dir))
+        print(f"Building dataset ({len(filenames)} files)")
 
-    X_test_names = [x[1] for x in X_test_named]
-    os.makedirs("../data/named", exist_ok=True)
-    np.save("../data/named/names.npy", X_test_names)
+        for filename in tqdm(filenames, desc="Loading audio"):
+            noisy_audio, _ = librosa.load(
+                os.path.join(noisy_dir, "noised_" + filename), sr=None
+            )
+            clean_audio, _ = librosa.load(
+                os.path.join(clean_dir, filename), sr=None
+            )
 
-    train_dataset = TensorDataset(X_train, y_train)
-    test_dataset = TensorDataset(X_test, y_test)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+            noisy = noisy_audio / (np.max(np.abs(noisy_audio)) + 1e-8)
+            clean = clean_audio / (np.max(np.abs(clean_audio)) + 1e-8)
 
-    os.makedirs("../data/test_loader", exist_ok=True)
-    torch.save(test_loader, "../data/test_loader/test_loader_temp.pt")
+            noisy = torch.from_numpy(noisy).float().unsqueeze(0).unsqueeze(0)
+            clean = torch.from_numpy(clean).float().unsqueeze(0).unsqueeze(0)
 
-    # -------------------
-    # Model
-    # -------------------
-    model = SimpleDemucs().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            X.append(noisy)
+            y.append(clean)
 
-    # -------------------
-    # Criterion optimisé vectorisé
-    # -------------------
-    def criterion(y_hat_batch, y_batch, T):
-        resolutions = [[1024, 120, 600], [2048, 240, 1200]]  # [n_fft, hop_length, win_length]
-            
-        # -------- Time-domain L1 loss
-        temp_loss = torch.norm(y_batch - y_hat_batch, p=1, dim=[1, 2]).mean()
+        X = torch.cat(X, dim=0)
+        y = torch.cat(y, dim=0)
+
+        split = int(0.8 * len(X))
+
+        data = {
+            "X_train": X[:split],
+            "y_train": y[:split],
+            "X_test": X[split:],
+            "y_test": y[split:]
+        }
+
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        torch.save(data, cache_path)
+
+        print(f"Dataset cached at {cache_path}")
+        return data
+
+
+    # ======================================================
+    # LOSS
+    # ======================================================
+    def criterion(y_hat, y):
+        resolutions = [(1024, 120, 600), (2048, 240, 1200)]
+
+        # -------- Time-domain loss
+        temp_loss = torch.norm(y - y_hat, p=1, dim=[1, 2]).mean()
 
         stft_losses = []
-        for n_fft, hop_length, win_length in resolutions:
-            window = torch.hann_window(win_length, device=y_batch.device)
+        for n_fft, hop, win in resolutions:
+            window = torch.hann_window(win, device=y.device)
 
-            Y = torch.stft(
-                y_batch.squeeze(1),
-                n_fft=n_fft,
-                hop_length=hop_length,
-                win_length=win_length,
-                window=window,
-                return_complex=True
-            )
+            Y = torch.stft(y.squeeze(1), n_fft, hop, win, window, return_complex=True)
+            Y_hat = torch.stft(y_hat.squeeze(1), n_fft, hop, win, window, return_complex=True)
 
-            Y_hat = torch.stft(
-                y_hat_batch.squeeze(1),
-                n_fft=n_fft,
-                hop_length=hop_length,
-                win_length=win_length,
-                window=window,
-                return_complex=True
-            )
-
-            # -------- Magnitudes
             Y_mag = torch.abs(Y)
             Y_hat_mag = torch.abs(Y_hat)
 
-            # -------- Log-magnitude loss
             mag_loss = torch.norm(
                 torch.log10(Y_mag + 1e-8) - torch.log10(Y_hat_mag + 1e-8),
-                p=1,
-                dim=[1, 2]
+                p=1, dim=[1, 2]
             ).mean()
 
-            # -------- Spectral convergence
-            sc_loss = torch.norm(Y_mag - Y_hat_mag, p='fro', dim=[1, 2]) / (
-                torch.norm(Y_mag, p='fro', dim=[1, 2]) + 1e-8
-            )
-            sc_loss = sc_loss.mean()
+            sc_loss = (
+                torch.norm(Y_mag - Y_hat_mag, p="fro", dim=[1, 2]) /
+                (torch.norm(Y_mag, p="fro", dim=[1, 2]) + 1e-8)
+            ).mean()
 
-            # -------- Phase loss (stable & weighted)
-            phase_diff = torch.angle(Y) - torch.angle(Y_hat)
-            phase_loss = torch.mean(Y_mag * (1.0 - torch.cos(phase_diff)))
+            phase_loss = torch.mean(
+                Y_mag * (1.0 - torch.cos(torch.angle(Y) - torch.angle(Y_hat)))
+            )
 
             stft_losses.append(mag_loss + sc_loss + 0.02 * phase_loss)
 
-        stft_loss = torch.stack(stft_losses).mean()
-
-        return temp_loss + stft_loss
+        return temp_loss + torch.stack(stft_losses).mean()
 
 
-    # -------------------
-    # Training loop
-    # -------------------
-    train_loss, val_loss = [], []
-    os.makedirs("../models", exist_ok=True)
-    pbar = tqdm(total=num_epochs, desc="epochs")
+    # ======================================================
+    # PARAM COUNT
+    # ======================================================
+    def count_parameters(model):
+        total = sum(p.numel() for p in model.parameters())
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        return total, trainable
 
-    opt_epoch = 0
-    best_val_loss = float('inf')
 
-    for epoch in range(num_epochs):
-        model.train()
-        training_loss = 0.0
+    # ======================================================
+    # TRAINING
+    # ======================================================
+    def train(args):
+        device = get_device(args.device)
+        print(f"Device: {device}")
 
-        for X_batch, y_batch in train_loader:
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+        if args.use_cache and os.path.exists(args.cache_path):
+            print("Loading cached dataset")
+            data = torch.load(args.cache_path, map_location="cpu")
+        else:
+            data = build_and_cache_dataset(
+                args.clean_dir, args.noisy_dir, args.cache_path
+            )
 
-            optimizer.zero_grad()
-            outputs = model(X_batch)
-            loss = criterion(outputs, y_batch, T=X_batch.size(-1))
-            loss.backward()
-            optimizer.step()
+        train_loader = DataLoader(
+            TensorDataset(data["X_train"], data["y_train"]),
+            batch_size=args.batch_size,
+            shuffle=True
+        )
 
-            training_loss += loss.item() * X_batch.size(0)
+        test_loader = DataLoader(
+            TensorDataset(data["X_test"], data["y_test"]),
+            batch_size=args.batch_size,
+            shuffle=False
+        )
 
-        epoch_loss = training_loss / len(train_loader.dataset)
-        train_loss.append(epoch_loss)
+        # ================= MODEL =================
+        model = SimpleDemucs().to(device)
 
-        # Evaluation
-        model.eval()
-        test_loss = 0.0
-        with torch.no_grad():
-            for X_batch, y_batch in test_loader:
-                X_batch = X_batch.to(device)
-                y_batch = y_batch.to(device)
-                outputs = model(X_batch)
-                loss = criterion(outputs, y_batch, T=X_batch.size(-1))
-                test_loss += loss.item() * X_batch.size(0)
-        test_loss /= len(test_loader.dataset)
-        val_loss.append(test_loss)
+        total_params, trainable_params = count_parameters(model)
+        print(f"Model parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
 
-        if test_loss < best_val_loss:
-            best_val_loss = test_loss
-            opt_epoch = epoch
-            torch.save(model.state_dict(), "../models/DemucsLike.pt")
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-        print(f"Epoch {epoch+1}/{num_epochs} | Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
-        pbar.update(1)
+        best_val = float("inf")
+        train_losses, val_losses = [], []
 
-    pbar.close()
-    print(f"Best model saved at epoch {opt_epoch+1}/{num_epochs}")
+        os.makedirs("../models", exist_ok=True)
 
-    # -------------------
-    # Plot losses
-    # -------------------
-    plt.figure(figsize=(10,5))
-    plt.plot(train_loss, label='Train Loss', color='blue')
-    plt.plot(val_loss, label='Validation Loss', color='orange')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.title('Train / Validation Loss')
-    plt.grid()
-    plt.legend()
-    plt.show()
+        # ================= EPOCH LOOP =================
+        for epoch in range(args.epochs):
+            # -------- TRAIN --------
+            model.train()
+            total_loss = 0.0
+
+            train_pbar = tqdm(
+                train_loader,
+                desc=f"Epoch {epoch+1}/{args.epochs} [TRAIN]",
+                leave=False
+            )
+
+            for X, y in train_pbar:
+                X, y = X.to(device), y.to(device)
+
+                optimizer.zero_grad()
+                loss = criterion(model(X), y)
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item() * X.size(0)
+                train_pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+            train_loss = total_loss / len(train_loader.dataset)
+            train_losses.append(train_loss)
+
+            # -------- VALID --------
+            model.eval()
+            total_loss = 0.0
+
+            val_pbar = tqdm(
+                test_loader,
+                desc=f"Epoch {epoch+1}/{args.epochs} [VAL]",
+                leave=False
+            )
+
+            with torch.no_grad():
+                for X, y in val_pbar:
+                    X, y = X.to(device), y.to(device)
+                    loss = criterion(model(X), y)
+                    total_loss += loss.item() * X.size(0)
+                    val_pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+            val_loss = total_loss / len(test_loader.dataset)
+            val_losses.append(val_loss)
+
+            # -------- SAVE --------
+            if val_loss < best_val:
+                best_val = val_loss
+                torch.save(model.state_dict(), "../models/DemucsLike.pt")
+
+            print(
+                f"Epoch [{epoch+1}/{args.epochs}] "
+                f"Train: {train_loss:.4f} | Val: {val_loss:.4f}"
+            )
+
+        # ================= PLOT =================
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_losses, label="Train")
+        plt.plot(val_losses, label="Val")
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+
+    # ======================================================
+    # MAIN
+    # ======================================================
+    if __name__ == "__main__":
+        args = get_args()
+        train(args)
+
+            
+
+
+
+    ##cmd :
+
+    # python train_gpu.py \
+    #     --epochs 30 \
+    #     --batch_size 16 \
+    #     --lr 0.0003 \
+    #     --use_cache \
+    #     --device cuda
