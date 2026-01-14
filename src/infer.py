@@ -7,7 +7,6 @@ import librosa
 from os.path import isdir
 import numpy as np
 import soundfile as sf
-from sklearn.preprocessing import MinMaxScaler
 
 binary_method = 0
 complex_masks_method = 0
@@ -35,7 +34,7 @@ if binary_method :
     #Device
     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
-    model = UNet()
+    model = Model()
     model.to(device) 
     model.load_state_dict(torch.load("../models/Unet.pt"))
     model.eval()
@@ -220,44 +219,103 @@ if complex_masks_method :
             index += 1
 
 
-if temporal_method:
+# if temporal_method:
 
+#     sr = 16000
+
+#     test_loader = torch.load("../data/test_loader/test_loader_temp.pt", weights_only=False)
+#     X_test_names = np.load("../data/named/names.npy")
+
+#     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+
+#     model = SimpleDemucs()
+#     model.to(device)
+#     model.load_state_dict(torch.load("../models/Model_github_unet.pt", map_location=device))
+#     model.eval()
+
+#     if not os.path.isdir("../data/synth_data_temp"):
+#         os.mkdir("../data/synth_data_temp")
+
+#     output_dir = "../data/synth_data_temp"
+#     clean_dataset_dir = "../data/clean_dataset_norm"
+
+#     X_test_names = [f.replace(".npy", "") for f in X_test_names]
+
+#     outputs_idx = 0
+
+#     with torch.no_grad():
+#         for X_batch, _ in test_loader:
+#             X_batch = X_batch.to(device)
+
+#             outputs = model(X_batch) 
+#             outputs = outputs.cpu().numpy()
+
+#             batch_size = outputs.shape[0]
+
+#             for j in range(batch_size):
+
+#                 clean_name = X_test_names[outputs_idx]
+#                 y_pred = outputs[j][0] 
+
+#                 sf.write(f"{output_dir}/{clean_name}", y_pred, samplerate = sr)
+
+#                 outputs_idx += 1
+
+
+if temporal_method :
     sr = 16000
 
     test_loader = torch.load("../data/test_loader/test_loader_temp.pt", weights_only=False)
-    X_test_names = np.load("../data/named/names.npy")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
-    model = DemucsLike()
+    model = Model()
     model.to(device)
-    model.load_state_dict(torch.load("../models/DemucsLike.pt", map_location=device))
+    model.load_state_dict(torch.load("../models/Model_github_unet.pt", map_location=device))
     model.eval()
 
-    if not os.path.isdir("../data/synth_data_temp"):
-        os.mkdir("../data/synth_data_temp")
-
     output_dir = "../data/synth_data_temp"
-    clean_dataset_dir = "../data/clean_dataset_norm"
+    clean_dir = "../data/clean_dataset_norm"
 
-    X_test_names = [f.replace(".npy", "") for f in X_test_names]
+    os.makedirs(output_dir, exist_ok=True)
 
-    outputs_idx = 0
+    sdr_out = []
+    file_idx = 0
 
     with torch.no_grad():
-        for X_batch, _ in test_loader:
+        for X_batch, y_batch in test_loader:
             X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
 
-            outputs = model(X_batch) 
+            outputs = model(X_batch)
+
             outputs = outputs.cpu().numpy()
+            y_batch = y_batch.cpu().numpy()
 
             batch_size = outputs.shape[0]
 
-            for j in range(batch_size):
+            for i in range(batch_size):
 
-                clean_name = X_test_names[outputs_idx]
-                y_pred = outputs[j][0] 
+                filename = f"sample_{file_idx:06d}.wav"
 
-                sf.write(f"{output_dir}/{clean_name}", y_pred, samplerate = sr)
+                s_hat = outputs[i][0]
+                s = y_batch[i][0]
 
-                outputs_idx += 1
+                sf.write(os.path.join(output_dir, filename), s_hat, sr)
+
+                # Padding / cropping
+                if len(s_hat) < len(s):
+                    s_hat = np.pad(s_hat, (0, len(s) - len(s_hat)))
+                elif len(s_hat) > len(s):
+                    s_hat = s_hat[:len(s)]
+
+                e = s_hat - s
+                Ps = np.sum(s ** 2)
+                Pe = np.sum(e ** 2) + 1e-8
+
+                sdr = 10 * np.log10(Ps / Pe)
+                sdr_out.append(sdr)
+
+                file_idx += 1
+
+    print(f"SDR moyen : {np.mean(sdr_out):.2f} dB")
