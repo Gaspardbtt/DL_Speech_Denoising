@@ -639,6 +639,7 @@ if temporal_method :
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         torch.save(data, cache_path)
 
+
         print(f"Dataset cached at {cache_path}")
         return data
 
@@ -647,38 +648,63 @@ if temporal_method :
     # LOSS
     # ======================================================
     def criterion(y_hat, y):
+        """
+        y_hat, y : (B, 1, T)
+        """
+
+        # -------- squeeze canal
+        y_hat = y_hat.squeeze(1)
+        y = y.squeeze(1)
+
+        # -------- Time-domain L1 (batch-mean)
+        temp_loss = F.l1_loss(y_hat, y)
+
+        # -------- Multi-resolution STFT
         resolutions = [(1024, 120, 600), (2048, 240, 1200)]
+        stft_loss = 0.0
 
-        # -------- Time-domain loss
-        temp_loss = torch.norm(y - y_hat, p=1, dim=[1, 2]).mean()
-
-        stft_losses = []
         for n_fft, hop, win in resolutions:
             window = torch.hann_window(win, device=y.device)
 
-            Y = torch.stft(y.squeeze(1), n_fft, hop, win, window, return_complex=True)
-            Y_hat = torch.stft(y_hat.squeeze(1), n_fft, hop, win, window, return_complex=True)
+            Y = torch.stft(
+                y,
+                n_fft=n_fft,
+                hop_length=hop,
+                win_length=win,
+                window=window,
+                return_complex=True
+            )
+            Y_hat = torch.stft(
+                y_hat,
+                n_fft=n_fft,
+                hop_length=hop,
+                win_length=win,
+                window=window,
+                return_complex=True
+            )
 
             Y_mag = torch.abs(Y)
             Y_hat_mag = torch.abs(Y_hat)
 
-            mag_loss = torch.norm(
-                torch.log10(Y_mag + 1e-8) - torch.log10(Y_hat_mag + 1e-8),
-                p=1, dim=[1, 2]
-            ).mean()
-
-            sc_loss = (
-                torch.norm(Y_mag - Y_hat_mag, p="fro", dim=[1, 2]) /
-                (torch.norm(Y_mag, p="fro", dim=[1, 2]) + 1e-8)
-            ).mean()
-
-            phase_loss = torch.mean(
-                Y_mag * (1.0 - torch.cos(torch.angle(Y) - torch.angle(Y_hat)))
+            # -------- Log magnitude loss (L1)
+            mag_loss = F.l1_loss(
+                torch.log(Y_hat_mag + 1e-8),
+                torch.log(Y_mag + 1e-8)
             )
 
-            stft_losses.append(mag_loss + sc_loss + 0.02 * phase_loss)
+            # -------- Spectral convergence (batch mean)
+            sc_loss = torch.norm(Y_mag - Y_hat_mag, p="fro") / (
+                torch.norm(Y_mag, p="fro") + 1e-8
+            )
 
-        return temp_loss + torch.stack(stft_losses).mean()
+            stft_loss += mag_loss + sc_loss
+
+        stft_loss /= len(resolutions)
+
+        # -------- FINAL LOSS (Demucs-style balance)
+        return temp_loss + 0.05 * stft_loss
+        # return temp_loss
+
 
 
     # ======================================================
@@ -717,8 +743,11 @@ if temporal_method :
             shuffle=False
         )
 
+        os.makedirs("../data/test_loader", exist_ok=True)
+        torch.save(test_loader, "../data/test_loader/test_loader_temp.pt")
+
         # ================= MODEL =================
-        model = SimpleDemucs().to(device)
+        model = Model().to(device)
 
         total_params, trainable_params = count_parameters(model)
         print(f"Model parameters: {total_params:,}")
@@ -754,8 +783,15 @@ if temporal_method :
                 total_loss += loss.item() * X.size(0)
                 train_pbar.set_postfix(loss=f"{loss.item():.4f}")
 
+
+            
             train_loss = total_loss / len(train_loader.dataset)
-            train_losses.append(train_loss)
+
+
+            if epoch == 0 :
+                max_loss_initial = train_loss
+
+            train_losses.append(train_loss/max_loss_initial)
 
             # -------- VALID --------
             model.eval()
@@ -773,18 +809,24 @@ if temporal_method :
                     loss = criterion(model(X), y)
                     total_loss += loss.item() * X.size(0)
                     val_pbar.set_postfix(loss=f"{loss.item():.4f}")
+            
 
             val_loss = total_loss / len(test_loader.dataset)
-            val_losses.append(val_loss)
+            if epoch == 0 :
+                val_max = val_loss
+
+
+            val_losses.append(val_loss/val_max)
+        
 
             # -------- SAVE --------
-            if val_loss < best_val:
+            if val_loss/val_max < best_val:
                 best_val = val_loss
-                torch.save(model.state_dict(), "../models/DemucsLike.pt")
+                torch.save(model.state_dict(), "../models/Model_github_unet.pt")
 
             print(
                 f"Epoch [{epoch+1}/{args.epochs}] "
-                f"Train: {train_loss:.4f} | Val: {val_loss:.4f}"
+                f"Train: {train_losses[epoch]:.4f} | Val: {val_losses[epoch]:.4f}"
             )
 
         # ================= PLOT =================
@@ -794,6 +836,9 @@ if temporal_method :
         plt.legend()
         plt.grid()
         plt.show()
+
+        plt.savefig("../models/Model_github_unet_loss_curve.png", dpi=300, bbox_inches="tight")
+
 
 
     # ======================================================
