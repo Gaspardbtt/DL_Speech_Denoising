@@ -255,7 +255,7 @@ class DemucsLike(nn.Module):
 
 #---------------------Demucs simple-----------------------
 
-class VerySimpleDemucs(nn.Module):
+class SimpleDemucs(nn.Module):
     def __init__(self, input_channels=1, hidden=64, lstm_hidden=128, dropout_rate=0.1):
         super().__init__()
 
@@ -326,27 +326,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --------------------------------------------------
-# Gated Convolution (GLU)
-# --------------------------------------------------
+# ------------------------------
+# GLU Convolution
+# ------------------------------
 class ConvGLU(nn.Module):
     def __init__(self, in_ch, out_ch, kernel_size=8, stride=2, padding=3):
         super().__init__()
         self.conv = nn.Conv1d(
-            in_ch, out_ch * 2,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding
+            in_ch, out_ch * 2, kernel_size=kernel_size, stride=stride, padding=padding
         )
 
     def forward(self, x):
         a, b = self.conv(x).chunk(2, dim=1)
         return a * torch.sigmoid(b)
 
-
-# --------------------------------------------------
+# ------------------------------
 # Encoder
-# --------------------------------------------------
+# ------------------------------
 class EncoderBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
@@ -358,21 +354,15 @@ class EncoderBlock(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
-# --------------------------------------------------
+# ------------------------------
 # Decoder
-# --------------------------------------------------
+# ------------------------------
 class DecoderBlock(nn.Module):
     def __init__(self, in_ch, out_ch, skip_ch):
         super().__init__()
-
         self.deconv = nn.ConvTranspose1d(
-            in_ch, out_ch * 2,
-            kernel_size=8,
-            stride=2,
-            padding=3
+            in_ch, out_ch * 2, kernel_size=8, stride=2, padding=3
         )
-
         self.norm = nn.GroupNorm(1, out_ch)
         self.skip_proj = nn.Conv1d(skip_ch, out_ch, kernel_size=1)
 
@@ -380,35 +370,31 @@ class DecoderBlock(nn.Module):
         a, b = self.deconv(x).chunk(2, dim=1)
         x = a * torch.sigmoid(b)
         x = self.norm(x)
-
         skip = self.skip_proj(skip)
         x = x[..., :skip.size(-1)]
-
         return x + skip
 
-
-# --------------------------------------------------
-# LIGHT DEMUCS
-# --------------------------------------------------
-class SimpleDemucs(nn.Module):
+# ------------------------------
+# Ultra-light Demucs
+# ------------------------------
+class ULtraLightDemucs(nn.Module):
     def __init__(
         self,
         input_channels=1,
-        base_channels=32,
-        depth=5,
-        max_channels=256,
-        lstm_hidden=256,
+        base_channels=16,     # très petit
+        depth=4,              # moins de couches
+        max_channels=64,      # limite les channels
+        lstm_hidden=64,       # LSTM réduit
         dropout=0.1
     ):
         super().__init__()
-
         self.encoders = nn.ModuleList()
         self.decoders = nn.ModuleList()
 
         ch = input_channels
         encoder_channels = []
 
-        # -------- Encoder
+        # ---- Encoder
         for _ in range(depth):
             out_ch = min(base_channels, max_channels)
             self.encoders.append(EncoderBlock(ch, out_ch))
@@ -416,7 +402,7 @@ class SimpleDemucs(nn.Module):
             ch = out_ch
             base_channels *= 2
 
-        # -------- Bottleneck LSTM (raisonnable)
+        # ---- Bottleneck LSTM
         self.lstm = nn.LSTM(
             input_size=ch,
             hidden_size=lstm_hidden,
@@ -424,22 +410,18 @@ class SimpleDemucs(nn.Module):
             bidirectional=True,
             batch_first=True
         )
-
         self.linear = nn.Linear(lstm_hidden * 2, ch)
         self.dropout = nn.Dropout(dropout)
 
-        # -------- Decoder
+        # ---- Decoder
         for skip_ch in reversed(encoder_channels):
-            self.decoders.append(
-                DecoderBlock(ch, skip_ch, skip_ch)
-            )
+            self.decoders.append(DecoderBlock(ch, skip_ch, skip_ch))
             ch = skip_ch
 
         self.final = nn.Conv1d(ch, input_channels, kernel_size=1)
 
     def forward(self, x):
         orig_len = x.size(-1)
-
         skips = []
         for enc in self.encoders:
             x = enc(x)
@@ -455,10 +437,116 @@ class SimpleDemucs(nn.Module):
             x = dec(x, skips.pop())
 
         x = self.final(x)
-
         if x.size(-1) != orig_len:
             x = F.pad(x, (0, orig_len - x.size(-1)))
-
         return x
 
 
+
+##################### Unet ##################### github repo : https://github.com/haoxiangsnr/Wave-U-Net-for-Speech-Enhancement/blob/master/model/unet_basic.py
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class DownSamplingLayer(nn.Module):
+    def __init__(self, channel_in, channel_out, dilation=1, kernel_size=15, stride=1, padding=7):
+        super(DownSamplingLayer, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv1d(channel_in, channel_out, kernel_size=kernel_size,
+                      stride=stride, padding=padding, dilation=dilation),
+            nn.BatchNorm1d(channel_out),
+            nn.LeakyReLU(negative_slope=0.1)
+        )
+
+    def forward(self, ipt):
+        return self.main(ipt)
+
+
+class UpSamplingLayer(nn.Module):
+    def __init__(self, channel_in, channel_out, kernel_size=5, stride=1, padding=2):
+        super(UpSamplingLayer, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv1d(channel_in, channel_out, kernel_size=kernel_size,
+                      stride=stride, padding=padding),
+            nn.BatchNorm1d(channel_out),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True),
+        )
+
+    def forward(self, ipt):
+        return self.main(ipt)
+
+
+class Model(nn.Module):
+    def __init__(self, n_layers=12, channels_interval=24):
+        super(Model, self).__init__()
+
+        self.n_layers = n_layers
+        self.channels_interval = channels_interval
+        encoder_in_channels_list = [1] + [i * self.channels_interval for i in range(1, self.n_layers)]
+        encoder_out_channels_list = [i * self.channels_interval for i in range(1, self.n_layers + 1)]
+
+        #          1    => 2    => 3    => 4    => 5    => 6   => 7   => 8   => 9  => 10 => 11 =>12
+        # 16384 => 8192 => 4096 => 2048 => 1024 => 512 => 256 => 128 => 64 => 32 => 16 =>  8 => 4
+        self.encoder = nn.ModuleList()
+        for i in range(self.n_layers):
+            self.encoder.append(
+                DownSamplingLayer(
+                    channel_in=encoder_in_channels_list[i],
+                    channel_out=encoder_out_channels_list[i]
+                )
+            )
+
+        self.middle = nn.Sequential(
+            nn.Conv1d(self.n_layers * self.channels_interval, self.n_layers * self.channels_interval, 15, stride=1,
+                      padding=7),
+            nn.BatchNorm1d(self.n_layers * self.channels_interval),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        )
+
+        decoder_in_channels_list = [(2 * i + 1) * self.channels_interval for i in range(1, self.n_layers)] + [
+            2 * self.n_layers * self.channels_interval]
+        decoder_in_channels_list = decoder_in_channels_list[::-1]
+        decoder_out_channels_list = encoder_out_channels_list[::-1]
+        self.decoder = nn.ModuleList()
+        for i in range(self.n_layers):
+            self.decoder.append(
+                UpSamplingLayer(
+                    channel_in=decoder_in_channels_list[i],
+                    channel_out=decoder_out_channels_list[i]
+                )
+            )
+
+        self.out = nn.Sequential(
+            nn.Conv1d(1 + self.channels_interval, 1, kernel_size=1, stride=1),
+            nn.Tanh()
+        )
+
+    def forward(self, input):
+        tmp = []
+        o = input
+
+        # Up Sampling
+        for i in range(self.n_layers):
+            o = self.encoder[i](o)
+            tmp.append(o)
+            # [batch_size, T // 2, channels]
+            o = o[:, :, ::2]
+
+        o = self.middle(o)
+
+        # Down Sampling
+        for i in range(self.n_layers):
+            # [batch_size, T * 2, channels]
+            o = F.interpolate(o, scale_factor=2, mode="linear", align_corners=True)
+            skip = tmp[self.n_layers - i - 1]
+            if o.size(-1) != skip.size(-1):
+                o = F.interpolate(o, size=skip.size(-1), mode="linear", align_corners=True)
+            # Skip Connection
+            o = torch.cat([o, skip], dim=1)
+            o = self.decoder[i](o)
+
+        o = torch.cat([o, input], dim=1)
+        o = self.out(o)
+        return o
